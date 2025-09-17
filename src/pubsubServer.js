@@ -275,7 +275,17 @@ function createMockPubSubServer(options = {}) {
     let startIndex = 0;
     const requestedCount = numRequested || topic.events.length;
     const totalEvents = topic.events.length;
-    const replayIdBuffer = replayIdMessage && replayIdMessage.value ? Buffer.from(replayIdMessage.value) : null;
+    let replayIdBuffer = null;
+    if (replayIdMessage && replayIdMessage.value) {
+      const rawValue = replayIdMessage.value;
+      if (typeof rawValue === "string") {
+        replayIdBuffer = Buffer.from(rawValue, "base64");
+      } else if (Buffer.isBuffer(rawValue)) {
+        replayIdBuffer = Buffer.from(rawValue);
+      } else if (Array.isArray(rawValue)) {
+        replayIdBuffer = Buffer.from(rawValue);
+      }
+    }
 
     switch (replayPreset) {
       case "LATEST":

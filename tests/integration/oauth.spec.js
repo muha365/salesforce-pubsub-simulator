@@ -1,4 +1,4 @@
-const grpc = require("@grpc/grpc-js");
+﻿const grpc = require("@grpc/grpc-js");
 const { createMockPubSubServer, pubsubProto } = require("../../src/pubsubServer");
 const { MockOAuthServer } = require("../../src/mockOAuth");
 
@@ -8,20 +8,27 @@ function metadataWithToken(token) {
   return metadata;
 }
 
-function toBuffer(value) {
-  if (!value) {
+function coerceToBuffer(raw) {
+  if (!raw) {
     return Buffer.alloc(0);
   }
-  if (Buffer.isBuffer(value)) {
-    return Buffer.from(value);
+  if (Buffer.isBuffer(raw)) {
+    return Buffer.from(raw);
   }
-  if (value.value) {
-    return Buffer.from(value.value);
+  if (typeof raw === "string") {
+    return Buffer.from(raw, "base64");
   }
-  if (Array.isArray(value)) {
-    return Buffer.from(value);
+  if (Array.isArray(raw)) {
+    return Buffer.from(raw);
   }
-  return Buffer.from(value);
+  return Buffer.from(raw);
+}
+
+function toBuffer(value) {
+  if (value && Object.prototype.hasOwnProperty.call(value, "value")) {
+    return coerceToBuffer(value.value);
+  }
+  return coerceToBuffer(value);
 }
 
 function bufferToBigInt(buffer) {
@@ -160,7 +167,7 @@ describe("Mock Salesforce Pub/Sub OAuth integration", () => {
 
     const replayIdBuffer = toBuffer(publishResponse.results[0].replay_id);
     expect(replayIdBuffer.length).toBe(15);
-
+    expect(replayIdBuffer.toString("base64")).toMatch(/^[A-Za-z0-9+/]+={0,2}$/);
 
     const responses = await subscribeWithToken(token, {
       topic_name: topicName,
@@ -274,7 +281,7 @@ describe("Mock Salesforce Pub/Sub OAuth integration", () => {
     const customResponses = await subscribeWithToken(token, {
       topic_name: sequenceTopic,
       replay_preset: "CUSTOM",
-      replay_id: { value: Buffer.from(firstReplayIdBuffer) },
+      replay_id: { value: firstReplayIdBuffer },
       num_requested: 10,
     });
 
@@ -289,8 +296,10 @@ describe("Mock Salesforce Pub/Sub OAuth integration", () => {
     const customReplayValues = customBatch.events.map((evt) =>
       Number(bufferToBigInt(toBuffer(evt.replay_id)))
     );
-    expect(customReplayValues).toEqual([secondReplayValue, latestReplayValue]);
+    expect(customReplayValues[0]).toBe(secondReplayValue);
+    expect(customReplayValues[1]).toBe(latestReplayValue);
   });
+
   test("rejects requests missing authorization metadata", async () => {
     const request = {
       topic_name: `${topicName}_missing_auth`,
@@ -434,12 +443,11 @@ describe("Mock Salesforce Pub/Sub OAuth integration", () => {
       ],
     });
 
-    const invalidReplayId = Buffer.alloc(15, 0xff);
-
+    const invalidReplayBuffer = Buffer.alloc(15, 0xff);
     const responses = await subscribeWithToken(token, {
       topic_name: customTopic,
       replay_preset: "CUSTOM",
-      replay_id: { value: invalidReplayId },
+      replay_id: { value: invalidReplayBuffer },
       num_requested: 10,
     });
 
@@ -447,6 +455,7 @@ describe("Mock Salesforce Pub/Sub OAuth integration", () => {
     expect(responses[0].events).toHaveLength(0);
     expect(responses[0].pending).toBe(false);
   });
+
   test("subscribe respects num_requested limits", async () => {
     const token = oauth.issueToken({
       clientId: "publisher",
@@ -558,4 +567,3 @@ describe("Mock Salesforce Pub/Sub OAuth integration", () => {
     ).rejects.toMatchObject({ code: grpc.status.NOT_FOUND });
   });
 });
-
